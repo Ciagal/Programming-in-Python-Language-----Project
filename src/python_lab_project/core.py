@@ -3,15 +3,70 @@ from dataclasses import dataclass
 from typing import Any, List, Dict, Optional, Sequence, Tuple, Union
 
 
-Row = Sequence[Any]  # np. ['Green', 3, 'Apple']
+Row = Sequence[Any]  # e.g. ['Green', 3, 'Apple']
+
+
+"""
+core
+====
+
+This module contains a minimal decision tree classifier implemented from scratch.
+The goal is to show, in a transparent way, how a tree can be built and used
+without relying on high-level libraries such as scikit-learn.
+
+Data representation
+-------------------
+
+Each row is represented as a sequence (e.g. list or tuple) where:
+
+* all columns except the last one are features,
+* the last column is the label/class.
+
+Example:
+
+    ["Green", 3, "Apple"]
+
+Here:
+
+* feature 0: color = "Green"
+* feature 1: size  = 3
+* label         = "Apple"
+
+The tree supports both numerical and categorical features:
+
+* numerical features are split using a threshold with condition ``>=``,
+* categorical features are split using equality ``==``.
+
+Main components
+---------------
+
+* :func:`gini_impurity` – computes the Gini impurity of a set of rows,
+* :func:`split_rows` – splits rows into two groups using a feature and a pivot,
+* :class:`Node` – a single node in the decision tree (internal node or leaf),
+* :class:`SimpleDecisionTree` – a basic decision tree classifier with a
+  scikit-learn-like interface (:meth:`fit`, :meth:`predict_one`,
+  :meth:`predict_proba_one`).
+
+The :func:`main` function at the bottom demonstrates a simple usage example
+on a tiny "fruit" dataset.
+"""
 
 
 def is_number(x: Any) -> bool:
+    """Return ``True`` if ``x`` is an integer or a float."""
     return isinstance(x, (int, float))
 
 
 def count_labels(rows: List[Row]) -> Dict[Any, int]:
-    """Policz ile razy pojawia się każda etykieta (ostatnia kolumna)."""
+    """Count how many times each label (last column) appears.
+
+    Args:
+        rows: List of rows. The last element of each row is treated as the label.
+
+    Returns:
+        A dictionary mapping each label to the number of its occurrences
+        in the provided rows.
+    """
     counts: Dict[Any, int] = {}
     for r in rows:
         lbl = r[-1]
@@ -20,7 +75,22 @@ def count_labels(rows: List[Row]) -> Dict[Any, int]:
 
 
 def gini_impurity(rows: List[Row]) -> float:
-    """Gini impurity dla danego zbioru przykładów."""
+    """Compute the Gini impurity for a given set of examples.
+
+    Gini impurity is defined as:
+
+    .. math::
+
+        G = 1 - \\sum_k p_k^2
+
+    where :math:`p_k` is the proportion of class :math:`k` in the set.
+
+    Args:
+        rows: List of rows. The last element of each row is treated as the label.
+
+    Returns:
+        The Gini impurity as a float in the range ``[0, 1]``.
+    """
     total = len(rows)
     if total == 0:
         return 0.0
@@ -37,7 +107,30 @@ def split_rows(
     col_index: int,
     pivot: Any,
 ) -> Tuple[List[Row], List[Row]]:
-    """Podziel wiersze na dwie grupy według warunku w kolumnie."""
+    """Split rows into two groups based on a condition in a given column.
+
+    For numerical values the condition is::
+
+        value >= pivot
+
+    For non-numerical (categorical) values the condition is::
+
+        value == pivot
+
+    Rows that satisfy the condition go to the ``left`` group, the rest go to
+    the ``right`` group.
+
+    Args:
+        rows: List of rows.
+        col_index: Index of the feature column used to split the rows.
+        pivot: Threshold or category used as the split value.
+
+    Returns:
+        A tuple ``(left, right)`` where:
+
+        * ``left`` contains rows where the condition is ``True``,
+        * ``right`` contains the remaining rows.
+    """
     left: List[Row] = []
     right: List[Row] = []
     for r in rows:
@@ -56,19 +149,33 @@ def split_rows(
 
 @dataclass
 class Node:
-    """Węzeł drzewa.
+    """A single node in the decision tree.
 
-    Jeśli to liść:
-      - feature_index = None
-      - threshold = None
-      - left/right = None
-      - prediction != None (słownik etykieta -> liczba wystąpień)
+    A node can be either:
 
-    Jeśli to węzeł decyzyjny:
-      - feature_index, threshold ustawione
-      - left/right to kolejne węzły
-      - prediction = None
+    * a **leaf** node:
+
+      - ``feature_index = None``
+      - ``threshold = None``
+      - ``left = None``
+      - ``right = None``
+      - ``prediction`` is a dictionary mapping labels to their counts
+
+    * or a **decision** (internal) node:
+
+      - ``feature_index`` and ``threshold`` are set
+      - ``left`` and ``right`` point to child nodes
+      - ``prediction = None``
+
+    Attributes:
+        feature_index: Index of the feature used for splitting at this node.
+        threshold: Threshold or category used for the split.
+        left: Left child node (rows that satisfied the split condition).
+        right: Right child node (rows that did not satisfy the split condition).
+        prediction: For leaf nodes, dictionary mapping labels to counts.
+            For internal nodes this is ``None``.
     """
+
     feature_index: Optional[int] = None
     threshold: Optional[Any] = None
     left: Optional["Node"] = None
@@ -77,25 +184,67 @@ class Node:
 
     @property
     def is_leaf(self) -> bool:
+        """Return ``True`` if this node is a leaf node."""
         return self.prediction is not None
 
 
 class SimpleDecisionTree:
-    """Proste drzewo decyzyjne do klasyfikacji."""
+    """A simple decision tree classifier.
+
+    This is a minimal implementation of a decision tree for educational
+    purposes. It operates on small tabular datasets where each row is a
+    sequence of values and the last element is the label.
+
+    The tree uses Gini impurity to choose the best splits and supports
+    both numerical and categorical features.
+
+    Args:
+        max_depth: Maximum depth of the tree. If ``None``, the tree is allowed
+            to grow until it hits other stopping criteria (e.g. minimum number
+            of samples in a node).
+        min_samples_split: Minimum number of samples required to split a node.
+
+    Attributes:
+        max_depth: Configured maximum depth of the tree.
+        min_samples_split: Configured minimum number of samples to split.
+        _root: The root :class:`Node` of the trained tree, or ``None`` if
+            the tree has not been fitted yet.
+    """
 
     def __init__(self, max_depth: Optional[int] = None, min_samples_split: int = 2):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self._root: Optional[Node] = None
 
-    # --- API zewnętrzne ---
+    # --- Public API ---
 
     def fit(self, rows: List[Row]) -> None:
-        """Zbuduj drzewo na podstawie danych treningowych."""
+        """Build the decision tree from the training data.
+
+        Args:
+            rows: Training data, a list of rows. Each row is a sequence where
+                all elements except the last one are features and the last
+                element is the label.
+        """
         self._root = self._build(rows, depth=0)
 
     def predict_proba_one(self, row: Row) -> Dict[Any, float]:
-        """Zwróć rozkład prawdopodobieństwa etykiet dla pojedynczego przykładu."""
+        """Return the label probability distribution for a single example.
+
+        The probabilities are computed from the label counts stored in the leaf
+        node reached by the given example.
+
+        Args:
+            row: A single input row (features and label). The label in the last
+                position is not used for prediction, but typical examples still
+                include it for convenience.
+
+        Returns:
+            A dictionary mapping labels to their estimated probabilities.
+
+        Raises:
+            RuntimeError: If the tree has not been fitted yet.
+        """
         if self._root is None:
             raise RuntimeError("Tree is not fitted yet.")
         leaf = self._traverse(row, self._root)
@@ -104,22 +253,47 @@ class SimpleDecisionTree:
         return {lbl: c / float(total) for lbl, c in counts.items()}
 
     def predict_one(self, row: Row) -> Any:
-        """Zwróć jedną etykietę – tę o największej liczbie w liściu."""
+        """Return the most likely label for a single example.
+
+        Args:
+            row: A single input row.
+
+        Returns:
+            The label with the highest estimated probability.
+        """
         proba = self.predict_proba_one(row)
-        # max po prawdopodobieństwie
+        # take the key with the highest probability
         return max(proba.items(), key=lambda kv: kv[1])[0]
 
     def print_tree(self) -> None:
+        """Print a human-readable representation of the tree structure."""
         if self._root is None:
             print("Tree is empty.")
         else:
             self._print_node(self._root, indent="")
 
-    # --- Implementacja wewnętrzna ---
+    # --- Internal implementation ---
 
     def _build(self, rows: List[Row], depth: int) -> Node:
-        """Rekurencyjna budowa drzewa."""
-        # warunki stopu
+        """Recursively build the tree.
+
+        This method creates either a leaf node (if a stopping condition is met)
+        or an internal decision node with left and right children.
+
+        Stopping conditions:
+
+        * number of rows in the node is smaller than ``min_samples_split``,
+        * current depth exceeds or reaches ``max_depth`` (if defined),
+        * no split can produce a positive gain.
+
+        Args:
+            rows: Rows that reach the current node.
+            depth: Current depth of the node in the tree (root has depth 0).
+
+        Returns:
+            A :class:`Node` representing the (sub)tree built from ``rows``.
+        """
+        # stopping conditions
         if len(rows) < self.min_samples_split:
             return Node(prediction=count_labels(rows))
         if self.max_depth is not None and depth >= self.max_depth:
@@ -127,7 +301,7 @@ class SimpleDecisionTree:
 
         best_gain, best_feature, best_threshold = self._best_split(rows)
 
-        # jeśli nie ma sensownego podziału → liść
+        # if no useful split is found -> leaf
         if best_gain <= 0 or best_feature is None:
             return Node(prediction=count_labels(rows))
 
@@ -146,16 +320,34 @@ class SimpleDecisionTree:
     def _best_split(
         self, rows: List[Row]
     ) -> Tuple[float, Optional[int], Optional[Any]]:
-        """Znajdź najlepszy podział: kolumna + próg + gain."""
+        """Find the best split: feature index, threshold and information gain.
+
+        The method iterates over all features and their unique values, tries
+        splitting the data using each value as a pivot, and keeps the split
+        that yields the highest decrease in impurity (i.e. highest gain).
+
+        Args:
+            rows: Rows belonging to the current node.
+
+        Returns:
+            A tuple ``(best_gain, best_feature, best_threshold)`` where:
+
+            * ``best_gain`` is the highest information gain found,
+            * ``best_feature`` is the index of the feature used for the split,
+            * ``best_threshold`` is the threshold/category used for the split.
+
+            If no valid split is found, ``best_gain`` is ``0.0`` and
+            ``best_feature`` as well as ``best_threshold`` are ``None``.
+        """
         current_impurity = gini_impurity(rows)
-        n_features = len(rows[0]) - 1  # ostatnia kolumna = etykieta
+        n_features = len(rows[0]) - 1  # last column is the label
 
         best_gain = 0.0
         best_feature: Optional[int] = None
         best_threshold: Optional[Any] = None
 
         for col in range(n_features):
-            values = {r[col] for r in rows}  # unikalne wartości w kolumnie
+            values = {r[col] for r in rows}  # unique values in the column
             for v in values:
                 left, right = split_rows(rows, col, v)
                 if not left or not right:
@@ -175,11 +367,19 @@ class SimpleDecisionTree:
         return best_gain, best_feature, best_threshold
 
     def _traverse(self, row: Row, node: Node) -> Node:
-        """Zejdź po drzewie do liścia dla danego przykładu."""
+        """Traverse the tree down to a leaf for a given example.
+
+        Args:
+            row: A single input row.
+            node: The current node from which we continue the traversal.
+
+        Returns:
+            The leaf :class:`Node` that the row ends up in.
+        """
         if node.is_leaf:
             return node
 
-        assert node.feature_index is not None  # dla mypy/IDE
+        assert node.feature_index is not None  # for mypy/IDE
         val = row[node.feature_index]
 
         if is_number(val):
@@ -193,7 +393,16 @@ class SimpleDecisionTree:
             return self._traverse(row, node.right)  # type: ignore[arg-type]
 
     def _print_node(self, node: Node, indent: str) -> None:
-        """Rekurencyjny wypis drzewa."""
+        """Recursively print a single node (and its children).
+
+        Leaf nodes print the label distribution in percentages.
+        Internal nodes print the splitting condition and then recursively
+        print the ``True`` and ``False`` branches with increased indentation.
+
+        Args:
+            node: Node to print.
+            indent: Prefix used to visually indent the output.
+        """
         if node.is_leaf:
             total = sum(node.prediction.values()) if node.prediction else 0
             pretty = {
@@ -214,7 +423,16 @@ class SimpleDecisionTree:
 
 
 def main():
-    # Ten sam prosty zbiór z owocami
+    """Small demo showcasing how to train and inspect the tree.
+
+    The example uses a tiny "fruit" dataset with two features:
+
+    * color (categorical),
+    * size (numerical),
+
+    and a label describing the type of fruit.
+    """
+    # Same simple fruit dataset as in many decision tree tutorials
     training_data = [
         ["Green", 3, "Apple"],
         ["Yellow", 3, "Apple"],
@@ -226,7 +444,7 @@ def main():
     tree = SimpleDecisionTree()
     tree.fit(training_data)
 
-    print("== Zbudowane drzewo ==")
+    print("== Built tree ==")
     tree.print_tree()
 
     test_rows = [
@@ -237,10 +455,11 @@ def main():
         ["Yellow", 3, "Lemon"],
     ]
 
-    print("\n== Predykcje ==")
+    print("\n== Predictions ==")
     for r in test_rows:
         predicted = tree.predict_proba_one(r)
         print(f"Actual: {r[-1]:6} | Predicted: {predicted}")
+
 
 if __name__ == "__main__":
     main()
